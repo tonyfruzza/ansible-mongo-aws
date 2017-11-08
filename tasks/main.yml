@@ -1,0 +1,19 @@
+- name: Install mongodb server
+  package:
+    name: mongodb-server
+    state: latest
+
+- name: Install mongodb client
+  package:
+    name: mongodb
+    state: latest
+
+- name: configure mongodb-server
+  template:
+    src: mongod.conf.j2
+    dest: /etc/mongod.conf
+
+- name: start mongodb server
+  service:
+    name: mongod
+    state: started
