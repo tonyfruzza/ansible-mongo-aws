@@ -1,3 +1,9 @@
+# MongoDB Replica Set in AWS
+
+* Target OS support is CentOS 6
+* Make use of tags for discovery of other machines
+* Updates Route53 to create A records for nodes based on value of DNS-Name
+
 ### Assuming ansible is installed
 ```
 mkdir -p /etc/ansible

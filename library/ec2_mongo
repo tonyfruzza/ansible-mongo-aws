@@ -2,6 +2,7 @@
 require 'rubygems'
 require 'json'
 require 'aws-sdk'
+# WANT_JSON
 
 class Ec2Tag2Instance
   def initialize
@@ -35,7 +36,11 @@ class Ec2Tag2Instance
 
   # based on the tag DNS-Name
   def what_should_my_dns_be?
-    get_instance_desc(get_instance_id).to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'DNS-Name'}[:value]
+    begin
+      get_instance_desc(get_instance_id).to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'DNS-Name'}[:value]
+    rescue
+      nil
+    end
   end
 
   def whats_my_ip?
@@ -89,22 +94,28 @@ end
 
 File.open(ARGV[0]) do |fh|
   data = JSON.parse(fh.read)
-  unless data['hosted_zone_id']
-    return JSON.dump({
+  begin
+    hosted_zone_id = data['hosted_zone_id']
+  rescue
+    print JSON.dump({
       failed: true,
       msg: 'set hosted_zone_id value'
     })
+    exit(1)
+  end
 
   etags = Ec2Tag2Instance.new
   ret = {
-    dns_cname: e_tags.what_should_my_dns_be?,
-    dns_ip: e_tags.whats_my_ip?
+    dns_cname: etags.what_should_my_dns_be?,
+    dns_ip: etags.whats_my_ip?
   }
 
+  assume_role_arn = data['assume_role_arn'].empty? ? nil : data['assume_role_arn']
+  puts assume_role_arn
   r = R53Change.new(
     etags.region,
-    data['hosted_zone_id'],
-    nill unless data['assume_role_arn']
+    hosted_zone_id,
+    assume_role_arn
   )
   r.update_record(etags.what_should_my_dns_be?, etags.whats_my_ip?)
 
