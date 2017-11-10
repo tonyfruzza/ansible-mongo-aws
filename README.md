@@ -28,5 +28,6 @@ ansible-playbook playbook.yml --connection=local
   vars:
     hosted_zone_id: ABCDEFGHIJKLM
     assume_role_arn: 'arn:aws:iam::123456789101:role/Route53UpdaterRole'
+    mongo_rep_set_name: reps
 
 ```
