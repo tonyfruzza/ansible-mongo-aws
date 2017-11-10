@@ -19,4 +19,7 @@ ansible-playbook playbook.yml --connection=local
   connection: local
   roles:
     - mongodb
+  hosted_zone_id: ABCDEFGHIJKLM
+  assume_role_arn: 'arn:aws:iam::123456789101:role/Route53UpdaterRole'
+
 ```

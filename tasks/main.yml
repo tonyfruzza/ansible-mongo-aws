@@ -1,3 +1,13 @@
+- name: Install ruby to support the library
+  package:
+    name: ruby
+    state: latest
+
+- name: Install required gems
+  gem:
+    name: aws-sdk
+    state: latest
+
 - name: Install mongodb server
   package:
     name: mongodb-server
@@ -8,6 +18,10 @@
     name: mongodb
     state: latest
 
+- name: Pip install pymongo
+  pip:
+    name: pymongo
+
 - name: configure mongodb-server
   template:
     src: mongod.conf.j2
@@ -17,3 +31,16 @@
   service:
     name: mongod
     state: started
+
+- name: Admin user for mongo
+  mongodb_user:
+    database: admin
+    name: mongo-admin
+    # password: {{ lookup('sis-ssm', '/site/pluto/mongo/admin-user') }}
+    password: 12345
+    state: present
+
+- name: Register IP with R53 and get mongo servers
+  action: ec2_mongo
+    hosted_zone_id: "{{ hosted_zone_id }}"
+    assume_role_arn: "{{ assume_role_arn }}"
