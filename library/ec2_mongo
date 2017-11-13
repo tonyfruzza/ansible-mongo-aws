@@ -1,12 +1,14 @@
 #!/usr/bin/env ruby
 require 'rubygems'
 require 'json'
+require 'net/http'
 require 'aws-sdk'
 # WANT_JSON
 
 class Ec2Tag2Instance
   def initialize
-    @region = Net::HTTP.get('169.254.169.254', '/latest/meta-data/placement/availability-zone').gsub(/[a-z]$/, '')
+    @region = Net::HTTP.get('169.254.169.254', '/latest/meta-data/placement/availability-zone').gsub(/[a-z]$/, '') unless /darwin/ =~ RUBY_PLATFORM
+    @region = 'us-east-1' if /darwin/ =~ RUBY_PLATFORM
     @ec2 = Aws::EC2::Client.new(region: @region)
     sleep 1 while !are_tags_available?
   end
@@ -16,7 +18,8 @@ class Ec2Tag2Instance
   end
 
   def get_instance_id
-   return Net::HTTP.get('169.254.169.254', '/latest/meta-data/instance-id')
+   return Net::HTTP.get('169.254.169.254', '/latest/meta-data/instance-id') unless /darwin/ =~ RUBY_PLATFORM
+   return 'i-04eb91e6cf2fd6050' if /darwin/ =~ RUBY_PLATFORM
   end
 
   def get_instance_desc(instance = nil)
@@ -24,23 +27,31 @@ class Ec2Tag2Instance
     @ec2.describe_instances({instance_ids: limit_instance})
   end
 
+  def get_other_mongo_dns_endpoints
+    get_other_mongo_machines.map{|i| get_mongo_dns_endpoint(i)}
+  end
+
   def are_tags_available?
     return true if get_instance_desc.to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'Name' && !tag[:value].empty?}
   end
 
-  def get_mongo_machines
+  def get_other_mongo_machines
     get_instance_desc.to_h[:reservations].select do |i|
       i[:instances].first[:tags].find{|tag| tag[:key] == 'Role' && tag[:value] == 'mongo'}
+    end.map{|i| i[:instances].first[:instance_id]} - [get_instance_id]
+  end
+
+  def get_mongo_dns_endpoint(instance_id)
+    begin
+      get_instance_desc(instance_id).to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'DNS-Name'}[:value]
+    rescue
+      nil
     end
   end
 
   # based on the tag DNS-Name
   def what_should_my_dns_be?
-    begin
-      get_instance_desc(get_instance_id).to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'DNS-Name'}[:value]
-    rescue
-      nil
-    end
+    get_mongo_dns_endpoint(get_instance_id)
   end
 
   def whats_my_ip?
@@ -92,6 +103,34 @@ class R53Change
   end
 end
 
+class LocalHostname
+  def initialize(host_name)
+    @hostname = host_name
+
+    update_hostname_file
+    update_etc_hosts_file
+    set_hostname
+  end
+
+  def update_hostname_file
+    File.open('/etc/hostname', 'w'){|f| f.puts @hostname}
+  end
+
+  def whats_my_ip?
+    return Net::HTTP.get('169.254.169.254', '/latest/meta-data/local-ipv4')
+  end
+
+  def update_etc_hosts_file
+    new_lines = File.read('/etc/hosts').each_line.reject{|l| /^#{whats_my_ip?}/ =~ l} + ["#{whats_my_ip?} #{@hostname}\n"]
+    File.open('/etc/hosts', 'w'){|f| f.puts new_lines}
+  end
+
+  def set_hostname
+    `hostname #{@hostname}`
+  end
+end
+
+# =begin
 File.open(ARGV[0]) do |fh|
   data = JSON.parse(fh.read)
   begin
@@ -105,19 +144,24 @@ File.open(ARGV[0]) do |fh|
   end
 
   etags = Ec2Tag2Instance.new
+  new_host_name = etags.what_should_my_dns_be?
   ret = {
-    dns_cname: etags.what_should_my_dns_be?,
+    dns_cname: new_host_name,
     dns_ip: etags.whats_my_ip?
   }
 
   assume_role_arn = data['assume_role_arn'].empty? ? nil : data['assume_role_arn']
-  puts assume_role_arn
   r = R53Change.new(
     etags.region,
     hosted_zone_id,
     assume_role_arn
   )
-  r.update_record(etags.what_should_my_dns_be?, etags.whats_my_ip?)
+  r.update_record(new_host_name, etags.whats_my_ip?)
+  LocalHostname.new(new_host_name)
 
   print JSON.dump(ret)
 end
+# =end
+
+# etags = Ec2Tag2Instance.new
+# p etags.get_other_mongo_dns_endpoints# .map{|i| i[:instances].first[:instance_id]}
