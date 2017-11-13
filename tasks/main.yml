@@ -3,9 +3,24 @@
     name: ruby
     state: latest
 
-- name: Install required gems
+- name: Install ruby to support the library
+  package:
+    name: ruby-dev
+    state: latest
+
+- name: Install gcc compiler
+  package:
+    name: gcc
+    state: latest
+
+- name: Install aws-sdk gem
   gem:
     name: aws-sdk
+    state: latest
+
+- name: Install mongo gem
+  gem:
+    name: mongo
     state: latest
 
 - name: Install mongodb server
@@ -30,7 +45,8 @@
 - name: start mongodb server
   service:
     name: mongod
-    state: started
+    enabled: true
+    state: restarted
 
 - name: Admin user for mongo
   mongodb_user:
