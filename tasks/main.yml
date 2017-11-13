@@ -1,37 +1,14 @@
-- name: Install ruby to support the library
+- name: Install supporting packages
   package:
-    name: ruby
+    name: "{{ item }}"
     state: latest
+  with_items: [ruby, ruby-devel, gcc, mongodb-server, mongodb]
 
-- name: Install ruby to support the library
-  package:
-    name: ruby-devel
-    state: latest
-
-- name: Install gcc compiler
-  package:
-    name: gcc
-    state: latest
-
-- name: Install aws-sdk gem
+- name: Install gems
   gem:
-    name: aws-sdk
+    name: {{ item }}
     state: latest
-
-- name: Install mongo gem
-  gem:
-    name: mongo
-    state: latest
-
-- name: Install mongodb server
-  package:
-    name: mongodb-server
-    state: latest
-
-- name: Install mongodb client
-  package:
-    name: mongodb
-    state: latest
+  with_items: [aws-sdk, mongo]
 
 - name: Pip install pymongo
   pip:
@@ -43,13 +20,13 @@
     enabled: true
     state: started
 
-- name: Admin user for mongo
-  mongodb_user:
-    database: admin
-    name: mongo-admin
-    # password: {{ lookup('sis-ssm', '/site/pluto/mongo/admin-user') }}
-    password: 12345
-    state: present
+# - name: Admin user for mongo
+#   mongodb_user:
+#     database: admin
+#     name: mongo-admin
+#     # password: {{ lookup('sis-ssm', '/site/pluto/mongo/admin-user') }}
+#     password: 12345
+#     state: present
 
 - name: configure mongodb-server
   template:
