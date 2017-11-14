@@ -1,3 +1,13 @@
+# Temp for sturdy env
+- name: Overwrite dns issues
+  template:
+    src: resolv.conf
+    dest: /etc/resolv.conf
+- name: Overwrite yum settings
+  template:
+    src: yum.conf
+    dest: /etc/yum.conf
+
 - name: Install supporting packages
   package:
     name: "{{ item }}"
