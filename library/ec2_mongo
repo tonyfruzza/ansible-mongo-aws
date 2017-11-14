@@ -3,6 +3,7 @@ require 'rubygems'
 require 'json'
 require 'net/http'
 require 'aws-sdk'
+require 'resolv'
 # WANT_JSON
 
 class Ec2Tag2Instance
@@ -145,10 +146,16 @@ File.open(ARGV[0]) do |fh|
 
   etags = Ec2Tag2Instance.new
   new_host_name = etags.what_should_my_dns_be?
-  ret = {
-    dns_cname: new_host_name,
-    dns_ip: etags.whats_my_ip?
-  }
+
+  # Check to see if any work is required here.
+  if Resolve.getname(etags.whats_my_ip?) ==  new_host_name && File.read('/etc/hostname').strip == new_host_name
+    print JSON.dump({
+      dns_cname: new_host_name,
+      dns_ip: etags.whats_my_ip?,
+      changed: false
+    })
+    return
+  end
 
   assume_role_arn = data['assume_role_arn'].empty? ? nil : data['assume_role_arn']
   r = R53Change.new(
@@ -159,7 +166,11 @@ File.open(ARGV[0]) do |fh|
   r.update_record(new_host_name, etags.whats_my_ip?)
   LocalHostname.new(new_host_name)
 
-  print JSON.dump(ret)
+  print JSON.dump({
+    dns_cname: new_host_name,
+    dns_ip: etags.whats_my_ip?,
+    changed: true
+  })
 end
 # =end
 
