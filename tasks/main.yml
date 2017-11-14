@@ -9,6 +9,8 @@
     name: "{{ item }}"
     state: latest
   with_items: [aws-sdk, mongo]
+  environment:
+    GEM_HOME: /usr/local/share/gems
 
 - name: Pip install pymongo
   pip:
