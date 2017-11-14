@@ -6,7 +6,7 @@
 
 - name: Install gems
   gem:
-    name: {{ item }}
+    name: "{{ item }}"
     state: latest
   with_items: [aws-sdk, mongo]
 
