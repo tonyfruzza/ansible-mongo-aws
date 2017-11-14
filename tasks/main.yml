@@ -28,8 +28,9 @@
     name: "{{ item }}"
     state: latest
   with_items: [aws-sdk, bson, mongo]
-  environment:
-    GEM_PATH: /usr/local/share/gems
+
+- name: rebuild gems natively
+  shell: gem pristine --all
 
 - name: Pip install pymongo
   pip:
