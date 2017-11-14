@@ -148,7 +148,7 @@ File.open(ARGV[0]) do |fh|
   new_host_name = etags.what_should_my_dns_be?
 
   # Check to see if any work is required here.
-  if Resolve.getname(etags.whats_my_ip?) ==  new_host_name && File.read('/etc/hostname').strip == new_host_name
+  if Resolv.getname(etags.whats_my_ip?) ==  new_host_name && File.read('/etc/hostname').strip == new_host_name
     print JSON.dump({
       dns_cname: new_host_name,
       dns_ip: etags.whats_my_ip?,
