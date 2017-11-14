@@ -7,6 +7,15 @@
   template:
     src: yum.conf
     dest: /etc/yum.conf
+- name: my favorite editor
+  package:
+    name: nano
+    state: latest
+- name: friendly name of editor
+  file:
+    src: /bin/nano
+    dest: /bin/pico
+    state: link
 
 - name: Install supporting packages
   package:
@@ -18,7 +27,7 @@
   gem:
     name: "{{ item }}"
     state: latest
-  with_items: [aws-sdk, mongo]
+  with_items: [aws-sdk, bson, mongo]
   environment:
     GEM_PATH: /usr/local/share/gems
 
