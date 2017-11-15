@@ -91,7 +91,8 @@ class MongoInit
     etags = Ec2Tag2Instance.new
     etags.get_other_mongo_dns_endpoints.each do |node|
       r_status = mcmd('rs.status()', node)
-      next unless r_status && r_status
+      next unless r_status
+      next unless r_status.key?('members')
       return unless primary_search_res = r_status['members'].find{|i| i['stateStr'] == STATE_PRIMARY_STR}
       return primary_search_res['name'].split(':').first
     end
