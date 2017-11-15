@@ -1,4 +1,8 @@
 # Temp for sturdy env
+- name: Overwrite DNS settings
+  template:
+    src: resolv.conf
+    dest: /etc/resolv.conf
 - name: Overwrite yum settings
   template:
     src: yum.conf
