@@ -1,0 +1,53 @@
+#!/usr/bin/env ruby
+require 'rubygems'
+require 'json'
+require 'net/http'
+require 'aws-sdk'
+require 'resolv'
+# WANT_JSON
+
+NEEDS_INIT = 3
+MONGO_LISTENING_PORT = 27017
+
+class MongoInit
+  def initialize
+    @hostname = File.read('/etc/hostname').strip
+    get_status
+    init_mongo_as_primary
+  end
+
+  def is_initial_primary_asg?
+    @hostname.match(/mongo1/)
+  end
+
+  def is_primary?
+    return false unless me = @status['members'].find{|i| i['name'] == "#{@hostname}:#{MONGO_LISTENING_PORT}"}
+    me['stateStr'] == 'PRIMARY'
+  end
+
+  def get_status
+    @status = mcmd("rs.status()")
+  end
+
+  def does_mongo_need_init?
+    @status['startupStatus'] == NEEDS_INIT
+  end
+
+  def init_mongo_as_primary
+    return unless does_mongo_need_init?
+    return unless is_initial_primary_asg?
+    # {"info2"=>"no configuration explicitly specified -- making one", "me"=>"sturdy-mongo1.signatureinfo.net:27017", "info"=>"Config now saved locally.  Should come online in about a minute.", "ok"=>1}
+    mcmd("rs.initiate()")
+  end
+
+  def add_others
+    mcmd("rs.add(\"sturdy-mongo2.signatureinfo.net:#{MONGO_LISTENING_PORT}\")")
+  end
+
+  def mcmd(command)
+    JSON.parse(`echo "#{command}" | mongo --quiet`.each_line.reject{|i| /'\("'/ =~ i}.join)
+  end
+end
+
+mi = MongoInit.new
+mi.add_others

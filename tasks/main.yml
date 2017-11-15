@@ -7,37 +7,25 @@
   template:
     src: yum.conf
     dest: /etc/yum.conf
-- name: my favorite editor
+
+- name: Install supporting packages
   package:
-    name: nano
+    name: "{{ item }}"
     state: latest
+  with_items: [ruby, mongodb-server, mongodb, nano]
+
 - name: friendly name of editor
   file:
     src: /bin/nano
     dest: /bin/pico
     state: link
 
-- name: Install supporting packages
-  package:
-    name: "{{ item }}"
-    state: latest
-  with_items: [ruby, ruby-devel, gcc, mongodb-server, mongodb]
-
 - name: Install gems
   gem:
     name: "{{ item }}"
     state: latest
     user_install: no
-  with_items: [aws-sdk, bson, mongo]
-  register: gem_installs
-
-# - name: rebuild gems natively
-#   shell: gem pristine --all
-#   when: gem_installs.change
-
-- name: Pip install pymongo
-  pip:
-    name: pymongo
+  with_items: [aws-sdk]
 
 - name: start mongodb server
   service:
@@ -45,6 +33,10 @@
     enabled: true
     state: started
 
+# - name: Pip install pymongo
+#   pip:
+#     name: pymongo
+#
 # - name: Admin user for mongo
 #   mongodb_user:
 #     database: admin
