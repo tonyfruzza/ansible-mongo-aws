@@ -6,48 +6,192 @@ require 'aws-sdk'
 require 'resolv'
 # WANT_JSON
 
+STATE_PRIMARY_STR = 'PRIMARY'
+STATE_REMOVED_STR = 'REMOVED'
+STATUS_OK = 1
 NEEDS_INIT = 3
 MONGO_LISTENING_PORT = 27017
+DEBUG = false
+ADD_ATTEMPTS_MAX = 5
 
 class MongoInit
   def initialize
     @hostname = File.read('/etc/hostname').strip
-    get_status
-    init_mongo_as_primary
+    @status = get_status
+    @add_me_attempts = 0
+    @ansible_ret_struct = {
+      changed: false,
+      failed: false,
+      msg: nil
+    }
+    unless @status
+      @ansible_ret_struct[:msg] = "Mongo not running!"
+      @ansible_ret_struct[:failed] = true
+      return @ansible_ret_struct
+    end
+    @primary = find_primary
+    puts "Primary server is #{@primary}" if DEBUG
+
+    add_self_to_cluster unless init_this_machine_as_master_if_it_should_be
   end
 
-  def is_initial_primary_asg?
-    @hostname.match(/mongo1/)
+  def output
+    return @ansible_ret_struct
   end
 
-  def is_primary?
-    return false unless me = @status['members'].find{|i| i['name'] == "#{@hostname}:#{MONGO_LISTENING_PORT}"}
-    me['stateStr'] == 'PRIMARY'
+  def get_status(from_host = 'localhost')
+    @status = mcmd('rs.status()', from_host)
   end
 
-  def get_status
-    @status = mcmd("rs.status()")
+  def add_self_to_cluster
+    return unless @primary
+    return if am_i_in_the_cluster?(true)
+    sleep 3 if @add_me_attempts > 0
+    @add_me_attempts += 1
+    res = mcmd("rs.add(\"#{@hostname}:#{MONGO_LISTENING_PORT}\")", @primary)
+    if res['ok'] == STATUS_OK
+      @ansible_ret_struct[:msg] = "Added to cluster with #{@primary} as primary"
+      @ansible_ret_struct[:changed] = true
+      return true
+    end
+    sleep 10 # Give some time for the status to update
+    current_clustering_status = am_i_in_the_cluster?(true)
+    # Sometimes this takes a couple tries
+    if @add_me_attempts > ADD_ATTEMPTS_MAX
+      puts "Could not add self to cluster after #{@add_me_attempts}" if DEBUG
+      @ansible_ret_struct[:msg] = "Could not add self to cluster after #{@add_me_attempts} attempts, primary is #{@primary}"
+      @ansible_ret_struct[:changed] = false
+      @ansible_ret_struct[:failed] = true
+      return false
+    end
+    add_self_to_cluster unless current_clustering_status
   end
 
-  def does_mongo_need_init?
-    @status['startupStatus'] == NEEDS_INIT
+  def am_i_in_the_cluster?(use_master = false)
+    # returns members record if found in replication set
+    get_status unless use_master
+    get_status(@primary) if use_master
+    if @status.key?('members')
+      self_search_res = @status['members'].find{|i| i['name'] == "#{@hostname}:#{MONGO_LISTENING_PORT}"}
+      return nil unless self_search_res
+      return nil if self_search_res['stateStr'] == STATE_REMOVED_STR
+      return self_search_res
+    end
   end
 
-  def init_mongo_as_primary
-    return unless does_mongo_need_init?
-    return unless is_initial_primary_asg?
+  # Returns a string of the master or nil
+  def find_primary
+    # We can see who's in cluster from @status
+    if am_i_in_the_cluster?
+      primary_search_res = @status['members'].find{|i| i['stateStr'] == STATE_PRIMARY_STR}
+      return primary_search_res['name'].split(':').first if primary_search_res
+    end
+
+    # Otherwise we have to see if someone else knows...
+    etags = Ec2Tag2Instance.new
+    etags.get_other_mongo_dns_endpoints.each do |node|
+      r_status = mcmd('rs.status()', node)
+      next unless r_status && r_status
+      return unless primary_search_res = r_status['members'].find{|i| i['stateStr'] == STATE_PRIMARY_STR}
+      return primary_search_res['name'].split(':').first
+    end
+
+    # didn't find a primary master
+    return nil
+  end
+
+  def init_this_machine_as_master_if_it_should_be
+    return nil if @primary
+    return nil unless @hostname.match(/mongo1/)
     # {"info2"=>"no configuration explicitly specified -- making one", "me"=>"sturdy-mongo1.signatureinfo.net:27017", "info"=>"Config now saved locally.  Should come online in about a minute.", "ok"=>1}
-    mcmd("rs.initiate()")
+    if @status.key?('startupStatus') && @status['startupStatus'] == NEEDS_INIT
+      mcmd("rs.initiate()")
+      @ansible_ret_struct[:msg] = "Initialized machine as PRIMARY"
+      @ansible_ret_struct[:changed] = true
+      sleep 3
+      get_status # update status of machines in cluster
+      add_machines_to_cluster
+      return true
+    end
+    return false # Something's not right
   end
 
-  def add_others
-    mcmd("rs.add(\"sturdy-mongo2.signatureinfo.net:#{MONGO_LISTENING_PORT}\")")
+  def add_node(node_hostname)
+    ret = mcmd("rs.add(\"#{node_hostname}:#{MONGO_LISTENING_PORT}\")")
+    ret['ok'] == 1
   end
 
-  def mcmd(command)
-    JSON.parse(`echo "#{command}" | mongo --quiet`.each_line.reject{|i| /'\("'/ =~ i}.join)
+  def mcmd(command, host = 'localhost')
+    begin
+      puts "> #{command} -> #{host}" if DEBUG
+      ret = JSON.parse(`echo '#{command}' | mongo #{host} --quiet`.each_line.reject{|i| /(Date)|(Time)/ =~ i}.join.tr("\t", '').tr("\n", '').gsub(/,}/, '}'))
+      puts "< #{ret}" if DEBUG
+      return ret
+    rescue
+      nil
+    end
+  end
+
+  def add_machines_to_cluster
+    get_status
+    machines_already_added = @status['members'].map{|i| i['name'].split(':').first}
+    etags = Ec2Tag2Instance.new
+    add_these_nodes = etags.get_other_mongo_dns_endpoints - machines_already_added
+    add_these_nodes.each{|node| add_node(node)}
+  end
+end
+
+class Ec2Tag2Instance
+  def initialize
+    @region = Net::HTTP.get('169.254.169.254', '/latest/meta-data/placement/availability-zone').gsub(/[a-z]$/, '')
+    @ec2 = Aws::EC2::Client.new(region: @region)
+    sleep 1 while !are_tags_available?
+  end
+
+  def region
+    @region
+  end
+
+  def get_instance_id
+   return Net::HTTP.get('169.254.169.254', '/latest/meta-data/instance-id')
+  end
+
+  def get_instance_desc(instance = nil)
+    limit_instance = [ instance ] if instance
+    @ec2.describe_instances({instance_ids: limit_instance})
+  end
+
+  def get_other_mongo_dns_endpoints
+    get_other_mongo_machines.map{|i| get_mongo_dns_endpoint(i)}
+  end
+
+  def are_tags_available?
+    return true if get_instance_desc.to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'Name' && !tag[:value].empty?}
+  end
+
+  def get_other_mongo_machines
+    get_instance_desc.to_h[:reservations].select do |i|
+      i[:instances].first[:tags].find{|tag| tag[:key] == 'Role' && tag[:value] == 'mongo'}
+    end.map{|i| i[:instances].first[:instance_id]} - [get_instance_id]
+  end
+
+  def get_mongo_dns_endpoint(instance_id)
+    begin
+      get_instance_desc(instance_id).to_h[:reservations].first[:instances].first[:tags].find{|tag| tag[:key] == 'DNS-Name'}[:value]
+    rescue
+      nil
+    end
+  end
+
+  # based on the tag DNS-Name
+  def what_should_my_dns_be?
+    get_mongo_dns_endpoint(get_instance_id)
+  end
+
+  def whats_my_ip?
+    return Net::HTTP.get('169.254.169.254', '/latest/meta-data/local-ipv4')
   end
 end
 
 mi = MongoInit.new
-mi.add_others
+print JSON.dump(mi.output)
